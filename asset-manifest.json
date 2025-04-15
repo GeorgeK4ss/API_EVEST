@@ -1,0 +1,15 @@
+{
+  "files": {
+    "main.css": "/API_EVEST/static/css/main.a9a6633e.css",
+    "main.js": "/API_EVEST/static/js/main.e809d52b.js",
+    "static/media/bootstrap-icons.woff?": "/API_EVEST/static/media/bootstrap-icons.39795c0b4513de014cf8.woff",
+    "static/media/bootstrap-icons.woff2?": "/API_EVEST/static/media/bootstrap-icons.b7bcc075b395c14ce8c2.woff2",
+    "index.html": "/API_EVEST/index.html",
+    "main.a9a6633e.css.map": "/API_EVEST/static/css/main.a9a6633e.css.map",
+    "main.e809d52b.js.map": "/API_EVEST/static/js/main.e809d52b.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.a9a6633e.css",
+    "static/js/main.e809d52b.js"
+  ]
+}
