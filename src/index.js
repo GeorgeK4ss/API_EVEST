@@ -5,11 +5,14 @@ import 'bootstrap/dist/css/bootstrap.min.css';
 import 'bootstrap-icons/font/bootstrap-icons.css';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import './styles/affiliate-panel.css';
+
+document.body.classList.add('ap-body');
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
     <App />
-    <ToastContainer position="top-right" autoClose={5000} />
+    <ToastContainer position="top-right" autoClose={5000} theme="dark" />
   </React.StrictMode>
 ); 
