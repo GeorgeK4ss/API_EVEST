@@ -1,7 +1,40 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { toast } from 'react-toastify';
 import { processLead } from '../services/leadService';
+import referralData from '../data/referralData.json';
+
+// Parameters whose options/labels the user can edit and we persist.
+const EDITABLE_REFERRAL_KEYS = ['affiliate_id', 'campaign_id', 'utm_campaign'];
+const STORAGE_KEY = 'referralData';
+
+// Defaults for the locked parameters (not user-editable, not persisted).
+const LOCKED_DEFAULTS = {
+  options: {
+    partner_id: ['c1a486dd6c8f128d0be36f669aa221fe'],
+    utm_source: ['Affiliate']
+  }
+};
+
+// Load persisted referral data: localStorage (runtime edits) over the JSON seed.
+const loadReferralData = () => {
+  const seed = {
+    options: { ...referralData.options },
+    labels: { ...referralData.labels }
+  };
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
+    if (saved && saved.options) {
+      EDITABLE_REFERRAL_KEYS.forEach((key) => {
+        if (saved.options[key]) seed.options[key] = saved.options[key];
+        if (saved.labels && saved.labels[key]) seed.labels[key] = saved.labels[key];
+      });
+    }
+  } catch (e) {
+    console.warn('Could not read saved referral data', e);
+  }
+  return seed;
+};
 
 const ExcelUploader = () => {
   const [isUploading, setIsUploading] = useState(false);
@@ -25,20 +58,62 @@ const ExcelUploader = () => {
   // These parameters are fixed: read-only, no dropdown and no "add option"
   const LOCKED_REFERRAL_KEYS = ['partner_id', 'utm_source'];
 
+  // Load persisted (JSON seed + localStorage) data once on mount.
+  const initialData = loadReferralData();
+
   // Available options for each referral parameter (you can add more at runtime)
   const [referralOptions, setReferralOptions] = useState({
-    affiliate_id: ['40175'],
-    campaign_id: ['136068'],
-    partner_id: ['c1a486dd6c8f128d0be36f669aa221fe'],
-    utm_source: ['Affiliate'],
-    utm_campaign: ['SnapAITrading']
+    ...initialData.options,
+    ...LOCKED_DEFAULTS.options
   });
 
   // Friendly internal-only labels for option values (display only, never sent).
   // e.g. affiliate_id "40175" is shown as "BrokerBase".
-  const [referralLabels, setReferralLabels] = useState({
-    affiliate_id: { '40175': 'BrokerBase' }
-  });
+  const [referralLabels, setReferralLabels] = useState(initialData.labels);
+
+  // Persist editable options/labels to localStorage (fallback / offline cache).
+  useEffect(() => {
+    const toSave = { options: {}, labels: {} };
+    EDITABLE_REFERRAL_KEYS.forEach((key) => {
+      toSave.options[key] = referralOptions[key] || [];
+      toSave.labels[key] = referralLabels[key] || {};
+    });
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+    } catch (e) {
+      console.warn('Could not save referral data', e);
+    }
+  }, [referralOptions, referralLabels]);
+
+  // Apply a dataset ({ options, labels }) coming from the API into state.
+  const applyReferralData = (data) => {
+    if (!data || !data.options) return;
+    setReferralOptions((prev) => {
+      const next = { ...prev };
+      EDITABLE_REFERRAL_KEYS.forEach((key) => {
+        if (data.options[key]) next[key] = data.options[key];
+      });
+      return next;
+    });
+    setReferralLabels((prev) => {
+      const next = { ...prev };
+      EDITABLE_REFERRAL_KEYS.forEach((key) => {
+        if (data.labels && data.labels[key]) next[key] = data.labels[key];
+      });
+      return next;
+    });
+  };
+
+  // On mount, try to load the latest list from the backend (file-backed).
+  useEffect(() => {
+    fetch('/api/referral')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => applyReferralData(data))
+      .catch(() => {
+        /* No backend (e.g. GitHub Pages): keep JSON seed + localStorage. */
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Build the text shown in a dropdown: "BrokerBase (40175)" or just the value.
   const optionLabel = (key, value) => {
@@ -88,6 +163,23 @@ const ExcelUploader = () => {
     }
     setReferralValues((prev) => ({ ...prev, [key]: value }));
     setNewOption((prev) => ({ ...prev, [key]: '' }));
+
+    // Try to persist to the file via the backend; ignore if it's not running.
+    if (EDITABLE_REFERRAL_KEYS.includes(key)) {
+      fetch('/api/referral', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, value, label })
+      })
+        .then((res) => {
+          if (res.ok) {
+            toast.success(`Saved ${key}: ${label ? `${label} (${value})` : value}`);
+          }
+        })
+        .catch(() => {
+          /* Backend offline: value is still kept in localStorage. */
+        });
+    }
     setNewOptionLabel((prev) => ({ ...prev, [key]: '' }));
   };
 

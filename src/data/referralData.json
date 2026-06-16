@@ -1,0 +1,20 @@
+{
+  "options": {
+    "affiliate_id": [
+      "40175"
+    ],
+    "campaign_id": [
+      "136068"
+    ],
+    "utm_campaign": [
+      "SnapAITrading"
+    ]
+  },
+  "labels": {
+    "affiliate_id": {
+      "40175": "BrokerBase"
+    },
+    "campaign_id": {},
+    "utm_campaign": {}
+  }
+}

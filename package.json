@@ -2,11 +2,13 @@
   "name": "excel-leads-uploader",
   "version": "0.1.0",
   "private": true,
-  "homepage": "https://yourusername.github.io/API_EVEST",
+  "homepage": "https://georgek4ss.github.io/API_EVEST",
   "dependencies": {
     "axios": "^1.6.2",
     "bootstrap": "^5.3.2",
     "bootstrap-icons": "^1.11.2",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-scripts": "5.0.1",
@@ -15,12 +17,15 @@
   },
   "scripts": {
     "start": "react-scripts start",
+    "server": "node server.js",
+    "dev": "concurrently -k -n API,WEB -c blue,green \"npm run server\" \"npm start\"",
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "predeploy": "npm run build",
     "deploy": "gh-pages -d build"
   },
+  "proxy": "http://localhost:4000",
   "eslintConfig": {
     "extends": [
       "react-app",
@@ -40,6 +45,7 @@
     ]
   },
   "devDependencies": {
+    "concurrently": "^10.0.3",
     "gh-pages": "^6.3.0"
   }
 }
