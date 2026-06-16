@@ -26,8 +26,12 @@ const loadReferralData = () => {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
     if (saved && saved.options) {
       EDITABLE_REFERRAL_KEYS.forEach((key) => {
-        if (saved.options[key]) seed.options[key] = saved.options[key];
-        if (saved.labels && saved.labels[key]) seed.labels[key] = saved.labels[key];
+        // Union: keep shared (file) entries AND any locally-added ones.
+        const base = seed.options[key] || [];
+        const extra = (saved.options[key] || []).filter((v) => !base.includes(v));
+        seed.options[key] = [...base, ...extra];
+        // Labels: file seed wins, local fills any gaps.
+        seed.labels[key] = { ...(saved.labels && saved.labels[key]), ...seed.labels[key] };
       });
     }
   } catch (e) {
