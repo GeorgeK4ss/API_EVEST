@@ -50,6 +50,10 @@ const ExcelUploader = () => {
   const [results, setResults] = useState([]);
   const [progress, setProgress] = useState(0);
   const fileInputRef = useRef(null);
+
+  // In-page paste editor (rows copied from Excel/Sheets), pre-seeded with headers.
+  const PASTE_HEADER = 'First Name\tLast Name\tPhone\tEmail\tutm_campaign';
+  const [pasteText, setPasteText] = useState(PASTE_HEADER + '\n');
   
   // API Configuration state with pre-filled static values
   const [apiConfig] = useState({
@@ -295,6 +299,81 @@ const ExcelUploader = () => {
     }
   };
 
+  // Coerce any cell to a trimmed string (handles numbers, dates, blanks)
+  const cell = (value) => (value === null || value === undefined ? '' : String(value).trim());
+
+  // Turn a 2D array (first row = headers) into leads. Shared by file upload + paste.
+  const rowsToLeads = (rows) => {
+    if (!Array.isArray(rows) || rows.length === 0 || !Array.isArray(rows[0])) {
+      toast.error('No data found');
+      return;
+    }
+
+    const headers = rows[0].map((h) => cell(h).toLowerCase());
+    const firstNameIndex = headers.indexOf('first name');
+    const lastNameIndex = headers.indexOf('last name');
+    const phoneIndex = headers.indexOf('phone');
+    const emailIndex = headers.indexOf('email');
+    const utmCampaignIndex = ['utm_campaign', 'utm campaign', 'campaign'].reduce(
+      (found, name) => (found !== -1 ? found : headers.indexOf(name)),
+      -1
+    );
+
+    if (firstNameIndex === -1 || phoneIndex === -1) {
+      toast.error('Data must contain at least "First Name" and "Phone" columns');
+      return;
+    }
+
+    const parsedLeads = rows.slice(1)
+      .map((row) => {
+        if (!Array.isArray(row)) return null;
+        let firstName = cell(row[firstNameIndex]);
+        let lastName = lastNameIndex !== -1 ? cell(row[lastNameIndex]) : '';
+
+        if (!lastName && firstName) {
+          const nameParts = firstName.split(' ').filter(Boolean);
+          if (nameParts.length > 1) {
+            lastName = nameParts.pop();
+            firstName = nameParts.join(' ');
+          } else {
+            lastName = firstName;
+          }
+        }
+
+        const email = emailIndex !== -1 ? cell(row[emailIndex]) : '';
+        const utmCampaign = utmCampaignIndex !== -1 ? cell(row[utmCampaignIndex]) : '';
+        return {
+          firstName,
+          lastName,
+          phone: cell(row[phoneIndex]),
+          email: email || undefined,
+          utmCampaign: utmCampaign || undefined
+        };
+      })
+      .filter((lead) => lead && lead.firstName && lead.lastName && lead.phone);
+
+    setLeads(parsedLeads);
+    const withUtm = parsedLeads.filter((l) => l.utmCampaign).length;
+    toast.success(
+      `Parsed ${parsedLeads.length} leads` +
+        (utmCampaignIndex !== -1 ? ` · ${withUtm} with utm_campaign` : '')
+    );
+  };
+
+  // Parse text copied from Excel/Sheets (tab- or comma-separated rows).
+  const parsePastedData = () => {
+    const text = (pasteText || '').replace(/\r/g, '').trim();
+    if (!text) {
+      toast.error('Paste some rows first');
+      return;
+    }
+    const rows = text.split('\n').map((line) => {
+      const delimiter = line.includes('\t') ? '\t' : ',';
+      return line.split(delimiter);
+    });
+    rowsToLeads(rows);
+  };
+
   const parseExcel = (file) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -303,72 +382,7 @@ const ExcelUploader = () => {
         const workbook = XLSX.read(data, { type: 'array' });
         const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
         const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
-
-        if (!Array.isArray(jsonData) || jsonData.length === 0 || !Array.isArray(jsonData[0])) {
-          toast.error('The Excel file appears to be empty');
-          return;
-        }
-
-        // Find column indices (coerce headers to strings so numbers/blanks are safe)
-        const headers = jsonData[0].map(header =>
-          (header === null || header === undefined ? '' : String(header)).trim().toLowerCase()
-        );
-        const firstNameIndex = headers.indexOf('first name');
-        const lastNameIndex = headers.indexOf('last name');
-        const phoneIndex = headers.indexOf('phone');
-        const emailIndex = headers.indexOf('email');
-        // Optional per-lead utm_campaign column (accepts a couple of header spellings)
-        const utmCampaignIndex = ['utm_campaign', 'utm campaign', 'campaign'].reduce(
-          (found, name) => (found !== -1 ? found : headers.indexOf(name)),
-          -1
-        );
-
-        if (firstNameIndex === -1 || phoneIndex === -1) {
-          toast.error('Excel file must contain at least "First Name" and "Phone" columns');
-          return;
-        }
-        
-        // Coerce any cell to a trimmed string (handles numbers, dates, blanks)
-        const cell = (value) =>
-          value === null || value === undefined ? '' : String(value).trim();
-
-        // Parse data rows
-        const parsedLeads = jsonData.slice(1).map(row => {
-          if (!Array.isArray(row)) return null;
-          let firstName = cell(row[firstNameIndex]);
-          let lastName = lastNameIndex !== -1 ? cell(row[lastNameIndex]) : '';
-
-          // If last name is empty, handle automation logic
-          if (!lastName && firstName) {
-            const nameParts = firstName.split(' ').filter(Boolean);
-
-            if (nameParts.length > 1) {
-              // If more than one word, move last word to last name
-              lastName = nameParts.pop();
-              firstName = nameParts.join(' ');
-            } else {
-              // If only one word, copy it to last name
-              lastName = firstName;
-            }
-          }
-
-          const email = emailIndex !== -1 ? cell(row[emailIndex]) : '';
-          const utmCampaign = utmCampaignIndex !== -1 ? cell(row[utmCampaignIndex]) : '';
-          return {
-            firstName,
-            lastName,
-            phone: cell(row[phoneIndex]),
-            email: email || undefined,
-            utmCampaign: utmCampaign || undefined
-          };
-        }).filter(lead => lead && lead.firstName && lead.lastName && lead.phone);
-
-        setLeads(parsedLeads);
-        const withUtm = parsedLeads.filter((l) => l.utmCampaign).length;
-        toast.success(
-          `Parsed ${parsedLeads.length} leads` +
-            (utmCampaignIndex !== -1 ? ` · ${withUtm} with utm_campaign from file` : '')
-        );
+        rowsToLeads(jsonData);
       } catch (error) {
         console.error('Error parsing Excel file:', error);
         toast.error('Failed to parse Excel file');
@@ -699,6 +713,45 @@ const ExcelUploader = () => {
           multiple words, the last word becomes the Last Name. Add an optional{' '}
           <span className="ap-code">utm_campaign</span> column to set it per lead; blank rows fall
           back to the default above.
+        </p>
+      </div>
+
+      {/* Paste from Excel */}
+      <div className="ap-card">
+        <div className="ap-card-head">
+          <i className="bi bi-clipboard-data-fill"></i>
+          <div>
+            <h2 className="ap-card-title">Paste from Excel</h2>
+            <p className="ap-card-sub">
+              Copy cells from Excel/Sheets and paste below (keep the header row)
+            </p>
+          </div>
+        </div>
+
+        <textarea
+          className="ap-input ap-paste"
+          spellCheck={false}
+          value={pasteText}
+          onChange={(e) => setPasteText(e.target.value)}
+          placeholder={PASTE_HEADER + '\nJohn\tDoe\t0501234567\t\tSnapAITrading'}
+          rows={8}
+        />
+
+        <div className="ap-actions" style={{ marginTop: 14, position: 'static' }}>
+          <button className="ap-btn ap-btn-ghost ap-btn-sm" onClick={parsePastedData}>
+            <i className="bi bi-table"></i> Parse pasted rows
+          </button>
+          <button
+            className="ap-btn ap-btn-ghost ap-btn-sm"
+            onClick={() => setPasteText(PASTE_HEADER + '\n')}
+          >
+            <i className="bi bi-eraser"></i> Clear
+          </button>
+        </div>
+
+        <p className="ap-hint">
+          First row must be the header. Columns are tab-separated (pasting from Excel does this
+          automatically) or comma-separated.
         </p>
       </div>
 

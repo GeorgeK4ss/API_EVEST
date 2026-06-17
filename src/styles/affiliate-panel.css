@@ -184,6 +184,19 @@ body.ap-body {
 .ap-add-group { display: flex; gap: 8px; margin-top: 8px; }
 .ap-add-group .ap-input { font-family: 'Fira Sans', sans-serif; }
 
+/* Paste editor */
+.ap-paste {
+  width: 100%;
+  min-height: 160px;
+  resize: vertical;
+  white-space: pre;
+  overflow-x: auto;
+  line-height: 1.6;
+  font-size: 0.85rem;
+  tab-size: 16;
+  -moz-tab-size: 16;
+}
+
 /* ---------------------------------------------------------------- Buttons */
 .ap-btn {
   display: inline-flex;
