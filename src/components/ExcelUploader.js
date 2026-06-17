@@ -51,9 +51,11 @@ const ExcelUploader = () => {
   const [progress, setProgress] = useState(0);
   const fileInputRef = useRef(null);
 
-  // In-page paste editor (rows copied from Excel/Sheets), pre-seeded with headers.
-  const PASTE_HEADER = 'First Name\tLast Name\tPhone\tEmail\tutm_campaign';
-  const [pasteText, setPasteText] = useState(PASTE_HEADER + '\n');
+  // In-page spreadsheet-style editor. Fixed columns; paste from Excel supported.
+  const GRID_COLUMNS = ['First Name', 'Last Name', 'Phone', 'Email', 'utm_campaign'];
+  const EMPTY_ROW = () => GRID_COLUMNS.map(() => '');
+  const makeEmptyGrid = (rows = 6) => Array.from({ length: rows }, EMPTY_ROW);
+  const [grid, setGrid] = useState(() => makeEmptyGrid());
   
   // API Configuration state with pre-filled static values
   const [apiConfig] = useState({
@@ -360,18 +362,50 @@ const ExcelUploader = () => {
     );
   };
 
-  // Parse text copied from Excel/Sheets (tab- or comma-separated rows).
-  const parsePastedData = () => {
-    const text = (pasteText || '').replace(/\r/g, '').trim();
-    if (!text) {
-      toast.error('Paste some rows first');
+  const updateCell = (r, c, value) => {
+    setGrid((prev) => {
+      const next = prev.map((row) => [...row]);
+      next[r][c] = value;
+      return next;
+    });
+  };
+
+  // Paste from Excel/Sheets: spreads clipboard cells across the grid from (r, c).
+  const handleCellPaste = (e, r, c) => {
+    const text = (e.clipboardData || window.clipboardData).getData('text');
+    if (!text || (!text.includes('\t') && !text.includes('\n'))) return; // single value: default paste
+    e.preventDefault();
+    const matrix = text
+      .replace(/\r/g, '')
+      .replace(/\n$/, '')
+      .split('\n')
+      .map((line) => line.split('\t'));
+
+    setGrid((prev) => {
+      const needed = r + matrix.length;
+      const next = prev.map((row) => [...row]);
+      while (next.length < needed) next.push(EMPTY_ROW());
+      matrix.forEach((cells, i) => {
+        cells.forEach((val, j) => {
+          const col = c + j;
+          if (col < GRID_COLUMNS.length) next[r + i][col] = val;
+        });
+      });
+      return next;
+    });
+  };
+
+  const addGridRows = (n = 3) => setGrid((prev) => [...prev, ...makeEmptyGrid(n)]);
+  const clearGrid = () => setGrid(makeEmptyGrid());
+
+  // Turn the grid into leads (prepend the fixed header row).
+  const parseGrid = () => {
+    const filled = grid.filter((row) => row.some((cell) => cell && cell.trim()));
+    if (filled.length === 0) {
+      toast.error('Enter or paste some rows first');
       return;
     }
-    const rows = text.split('\n').map((line) => {
-      const delimiter = line.includes('\t') ? '\t' : ',';
-      return line.split(delimiter);
-    });
-    rowsToLeads(rows);
+    rowsToLeads([GRID_COLUMNS, ...filled]);
   };
 
   const parseExcel = (file) => {
@@ -716,42 +750,63 @@ const ExcelUploader = () => {
         </p>
       </div>
 
-      {/* Paste from Excel */}
+      {/* Paste from Excel (spreadsheet grid) */}
       <div className="ap-card">
         <div className="ap-card-head">
           <i className="bi bi-clipboard-data-fill"></i>
           <div>
             <h2 className="ap-card-title">Paste from Excel</h2>
             <p className="ap-card-sub">
-              Copy cells from Excel/Sheets and paste below (keep the header row)
+              Click a cell and paste (Ctrl/Cmd+V) cells copied from Excel/Sheets
             </p>
           </div>
         </div>
 
-        <textarea
-          className="ap-input ap-paste"
-          spellCheck={false}
-          value={pasteText}
-          onChange={(e) => setPasteText(e.target.value)}
-          placeholder={PASTE_HEADER + '\nJohn\tDoe\t0501234567\t\tSnapAITrading'}
-          rows={8}
-        />
+        <div className="ap-sheet-wrap">
+          <table className="ap-sheet">
+            <thead>
+              <tr>
+                <th className="ap-sheet-rownum"></th>
+                {GRID_COLUMNS.map((col) => (
+                  <th key={col}>{col}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {grid.map((row, r) => (
+                <tr key={r}>
+                  <td className="ap-sheet-rownum">{r + 1}</td>
+                  {row.map((value, c) => (
+                    <td key={c}>
+                      <input
+                        className="ap-sheet-cell"
+                        value={value}
+                        onChange={(e) => updateCell(r, c, e.target.value)}
+                        onPaste={(e) => handleCellPaste(e, r, c)}
+                      />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
 
         <div className="ap-actions" style={{ marginTop: 14, position: 'static' }}>
-          <button className="ap-btn ap-btn-ghost ap-btn-sm" onClick={parsePastedData}>
-            <i className="bi bi-table"></i> Parse pasted rows
+          <button className="ap-btn ap-btn-ghost ap-btn-sm" onClick={parseGrid}>
+            <i className="bi bi-table"></i> Use these rows
           </button>
-          <button
-            className="ap-btn ap-btn-ghost ap-btn-sm"
-            onClick={() => setPasteText(PASTE_HEADER + '\n')}
-          >
+          <button className="ap-btn ap-btn-ghost ap-btn-sm" onClick={() => addGridRows(3)}>
+            <i className="bi bi-plus-lg"></i> Add rows
+          </button>
+          <button className="ap-btn ap-btn-ghost ap-btn-sm" onClick={clearGrid}>
             <i className="bi bi-eraser"></i> Clear
           </button>
         </div>
 
         <p className="ap-hint">
-          First row must be the header. Columns are tab-separated (pasting from Excel does this
-          automatically) or comma-separated.
+          Tip: in Excel, select your data (without the header), copy, click the first cell here, and
+          paste — extra rows are added automatically.
         </p>
       </div>
 

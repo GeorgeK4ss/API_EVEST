@@ -184,18 +184,64 @@ body.ap-body {
 .ap-add-group { display: flex; gap: 8px; margin-top: 8px; }
 .ap-add-group .ap-input { font-family: 'Fira Sans', sans-serif; }
 
-/* Paste editor */
-.ap-paste {
-  width: 100%;
-  min-height: 160px;
-  resize: vertical;
-  white-space: pre;
-  overflow-x: auto;
-  line-height: 1.6;
-  font-size: 0.85rem;
-  tab-size: 16;
-  -moz-tab-size: 16;
+/* Spreadsheet-style paste grid */
+.ap-sheet-wrap {
+  border: 1px solid var(--ap-border);
+  border-radius: var(--ap-radius-sm);
+  overflow: auto;
+  max-height: 340px;
 }
+.ap-sheet {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'Fira Code', monospace;
+  font-size: 0.82rem;
+}
+.ap-sheet th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ap-muted-strong);
+  background: rgba(15, 23, 42, 0.95);
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--ap-border);
+  border-right: 1px solid var(--ap-border);
+  white-space: nowrap;
+}
+.ap-sheet td {
+  padding: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+}
+.ap-sheet-rownum {
+  width: 40px;
+  text-align: center !important;
+  color: var(--ap-muted);
+  background: rgba(15, 23, 42, 0.6);
+  font-size: 0.72rem;
+  user-select: none;
+}
+.ap-sheet-cell {
+  width: 100%;
+  min-width: 120px;
+  border: none;
+  background: transparent;
+  color: var(--ap-text);
+  padding: 9px 10px;
+  font-family: inherit;
+  font-size: inherit;
+  outline: none;
+}
+.ap-sheet-cell:focus {
+  background: rgba(139, 92, 246, 0.18);
+  box-shadow: inset 0 0 0 2px var(--ap-cta);
+}
+.ap-sheet tbody tr:hover .ap-sheet-rownum { color: var(--ap-primary); }
 
 /* ---------------------------------------------------------------- Buttons */
 .ap-btn {
