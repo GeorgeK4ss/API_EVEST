@@ -5,7 +5,8 @@ import { processLead } from '../services/leadService';
 import referralData from '../data/referralData.json';
 
 // Parameters whose options/labels the user can edit and we persist.
-const EDITABLE_REFERRAL_KEYS = ['affiliate_id', 'campaign_id', 'utm_campaign'];
+// campaign_id is NOT here: it is derived from affiliate_id via campaignByAffiliate.
+const EDITABLE_REFERRAL_KEYS = ['affiliate_id', 'utm_campaign'];
 const STORAGE_KEY = 'referralData';
 
 // Defaults for the locked parameters (not user-editable, not persisted).
@@ -16,11 +17,12 @@ const LOCKED_DEFAULTS = {
   }
 };
 
-// Load persisted referral data: localStorage (runtime edits) over the JSON seed.
+// Load persisted referral data: localStorage (runtime edits) merged over the JSON seed.
 const loadReferralData = () => {
   const seed = {
     options: { ...referralData.options },
-    labels: { ...referralData.labels }
+    labels: { ...referralData.labels },
+    campaignByAffiliate: { ...(referralData.campaignByAffiliate || {}) }
   };
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
@@ -33,6 +35,8 @@ const loadReferralData = () => {
         // Labels: file seed wins, local fills any gaps.
         seed.labels[key] = { ...(saved.labels && saved.labels[key]), ...seed.labels[key] };
       });
+      // Affiliate -> campaign map: file seed wins, local fills any gaps.
+      seed.campaignByAffiliate = { ...saved.campaignByAffiliate, ...seed.campaignByAffiliate };
     }
   } catch (e) {
     console.warn('Could not read saved referral data', e);
@@ -75,9 +79,12 @@ const ExcelUploader = () => {
   // e.g. affiliate_id "40175" is shown as "BrokerBase".
   const [referralLabels, setReferralLabels] = useState(initialData.labels);
 
-  // Persist editable options/labels to localStorage (fallback / offline cache).
+  // Map of affiliate_id -> campaign_id. Picking an affiliate auto-sets the campaign.
+  const [campaignMap, setCampaignMap] = useState(initialData.campaignByAffiliate);
+
+  // Persist editable options/labels + campaign map to localStorage (fallback / offline cache).
   useEffect(() => {
-    const toSave = { options: {}, labels: {} };
+    const toSave = { options: {}, labels: {}, campaignByAffiliate: campaignMap };
     EDITABLE_REFERRAL_KEYS.forEach((key) => {
       toSave.options[key] = referralOptions[key] || [];
       toSave.labels[key] = referralLabels[key] || {};
@@ -87,9 +94,9 @@ const ExcelUploader = () => {
     } catch (e) {
       console.warn('Could not save referral data', e);
     }
-  }, [referralOptions, referralLabels]);
+  }, [referralOptions, referralLabels, campaignMap]);
 
-  // Apply a dataset ({ options, labels }) coming from the API into state.
+  // Apply a dataset ({ options, labels, campaignByAffiliate }) from the API into state.
   const applyReferralData = (data) => {
     if (!data || !data.options) return;
     setReferralOptions((prev) => {
@@ -106,6 +113,14 @@ const ExcelUploader = () => {
       });
       return next;
     });
+    if (data.campaignByAffiliate) {
+      setCampaignMap(data.campaignByAffiliate);
+      // Re-sync the derived campaign_id for the currently selected affiliate.
+      setReferralValues((prev) => ({
+        ...prev,
+        campaign_id: data.campaignByAffiliate[prev.affiliate_id] || prev.campaign_id
+      }));
+    }
   };
 
   // On mount, try to load the latest list from the backend (file-backed).
@@ -126,12 +141,15 @@ const ExcelUploader = () => {
   };
 
   // Currently selected value for each referral parameter
-  const [referralValues, setReferralValues] = useState({
-    affiliate_id: '40175',
-    campaign_id: '136068',
-    partner_id: 'c1a486dd6c8f128d0be36f669aa221fe',
-    utm_source: 'Affiliate',
-    utm_campaign: 'SnapAITrading'
+  const [referralValues, setReferralValues] = useState(() => {
+    const affiliate = (initialData.options.affiliate_id || ['40175'])[0];
+    return {
+      affiliate_id: affiliate,
+      campaign_id: initialData.campaignByAffiliate[affiliate] || '136068',
+      partner_id: 'c1a486dd6c8f128d0be36f669aa221fe',
+      utm_source: 'Affiliate',
+      utm_campaign: (initialData.options.utm_campaign || ['SnapAITrading'])[0]
+    };
   });
 
   // Text typed into the "add new option" input for each referral parameter
@@ -140,21 +158,44 @@ const ExcelUploader = () => {
   // Optional friendly name typed alongside a new option value
   const [newOptionLabel, setNewOptionLabel] = useState({});
 
-  // Build the referral string from the selected values, e.g. "affiliate_id=40175|campaign_id=..."
-  const buildReferral = () =>
+  // Campaign ID typed alongside a new affiliate_id (its linked campaign)
+  const [newOptionCampaign, setNewOptionCampaign] = useState({});
+
+  // Build the referral string. Optionally override utm_campaign per lead (from Excel).
+  const buildReferral = (utmOverride) =>
     REFERRAL_KEYS
-      .filter((key) => referralValues[key])
-      .map((key) => `${key}=${referralValues[key]}`)
+      .map((key) => {
+        if (key === 'utm_campaign') {
+          return { key, value: (utmOverride || referralValues.utm_campaign || '').toString().trim() };
+        }
+        return { key, value: referralValues[key] };
+      })
+      .filter(({ value }) => value)
+      .map(({ key, value }) => `${key}=${value}`)
       .join('|');
 
   const handleReferralChange = (key, value) => {
-    setReferralValues((prev) => ({ ...prev, [key]: value }));
+    setReferralValues((prev) => {
+      const next = { ...prev, [key]: value };
+      // Picking an affiliate auto-sets its linked campaign_id.
+      if (key === 'affiliate_id') {
+        next.campaign_id = campaignMap[value] || '';
+      }
+      return next;
+    });
   };
 
   const addReferralOption = (key) => {
     const value = (newOption[key] || '').trim();
     if (!value) return;
     const label = (newOptionLabel[key] || '').trim();
+    const campaign = key === 'affiliate_id' ? (newOptionCampaign[key] || '').trim() : '';
+
+    if (key === 'affiliate_id' && !campaign) {
+      toast.error('Please enter the Campaign ID for this affiliate');
+      return;
+    }
+
     setReferralOptions((prev) => ({
       ...prev,
       [key]: prev[key].includes(value) ? prev[key] : [...prev[key], value]
@@ -165,15 +206,24 @@ const ExcelUploader = () => {
         [key]: { ...(prev[key] || {}), [value]: label }
       }));
     }
-    setReferralValues((prev) => ({ ...prev, [key]: value }));
+    if (key === 'affiliate_id' && campaign) {
+      setCampaignMap((prev) => ({ ...prev, [value]: campaign }));
+    }
+    setReferralValues((prev) => {
+      const next = { ...prev, [key]: value };
+      if (key === 'affiliate_id') next.campaign_id = campaign;
+      return next;
+    });
     setNewOption((prev) => ({ ...prev, [key]: '' }));
+    setNewOptionLabel((prev) => ({ ...prev, [key]: '' }));
+    setNewOptionCampaign((prev) => ({ ...prev, [key]: '' }));
 
     // Try to persist to the file via the backend; ignore if it's not running.
     if (EDITABLE_REFERRAL_KEYS.includes(key)) {
       fetch('/api/referral', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key, value, label })
+        body: JSON.stringify({ key, value, label, campaign })
       })
         .then((res) => {
           if (res.ok) {
@@ -184,7 +234,6 @@ const ExcelUploader = () => {
           /* Backend offline: value is still kept in localStorage. */
         });
     }
-    setNewOptionLabel((prev) => ({ ...prev, [key]: '' }));
   };
 
   // Function to generate and download sample Excel template
@@ -195,11 +244,11 @@ const ExcelUploader = () => {
       
       // Sample data with headers and example rows that demonstrate the name handling feature
       const sampleData = [
-        ['First Name', 'Last Name', 'Phone', 'Email'],
-        ['John', 'Doe', '1234567890', '1234567890@gmail.com'],
-        ['Jane Smith', '', '9876543210', '9876543210@gmail.com'],
-        ['Robert James Miller', '', '5554443333', '5554443333@gmail.com'],
-        ['Maria', '', '7778889999', '7778889999@gmail.com']
+        ['First Name', 'Last Name', 'Phone', 'Email', 'utm_campaign'],
+        ['John', 'Doe', '1234567890', '1234567890@gmail.com', 'SnapAITrading'],
+        ['Jane Smith', '', '9876543210', '9876543210@gmail.com', 'SummerPromo'],
+        ['Robert James Miller', '', '5554443333', '5554443333@gmail.com', ''],
+        ['Maria', '', '7778889999', '7778889999@gmail.com', '']
       ];
       
       // Create worksheet from sample data
@@ -210,7 +259,8 @@ const ExcelUploader = () => {
         {wch: 20}, // First Name
         {wch: 15}, // Last Name
         {wch: 15}, // Phone
-        {wch: 25}  // Email
+        {wch: 25}, // Email
+        {wch: 18}  // utm_campaign
       ];
       worksheet['!cols'] = wscols;
       
@@ -221,8 +271,9 @@ const ExcelUploader = () => {
         ['1. Row 2: Standard format with First and Last Name in separate columns'],
         ['2. Row 3: First and Last Name in "First Name" column - last word becomes Last Name'],
         ['3. Row 4: Full name in "First Name" column - last word becomes Last Name'],
-        ['4. Row 5: Single word in "First Name" column - copied to Last Name']
-      ], {origin: 'A6'});
+        ['4. Row 5: Single word in "First Name" column - copied to Last Name'],
+        ['5. utm_campaign is optional per lead; if blank, the panel default is used']
+      ], {origin: 'A8'});
       
       // Add worksheet to workbook
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Leads Template');
@@ -266,7 +317,12 @@ const ExcelUploader = () => {
         const lastNameIndex = headers.indexOf('last name');
         const phoneIndex = headers.indexOf('phone');
         const emailIndex = headers.indexOf('email');
-        
+        // Optional per-lead utm_campaign column (accepts a couple of header spellings)
+        const utmCampaignIndex = ['utm_campaign', 'utm campaign', 'campaign'].reduce(
+          (found, name) => (found !== -1 ? found : headers.indexOf(name)),
+          -1
+        );
+
         if (firstNameIndex === -1 || phoneIndex === -1) {
           toast.error('Excel file must contain at least "First Name" and "Phone" columns');
           return;
@@ -297,16 +353,22 @@ const ExcelUploader = () => {
           }
 
           const email = emailIndex !== -1 ? cell(row[emailIndex]) : '';
+          const utmCampaign = utmCampaignIndex !== -1 ? cell(row[utmCampaignIndex]) : '';
           return {
             firstName,
             lastName,
             phone: cell(row[phoneIndex]),
-            email: email || undefined
+            email: email || undefined,
+            utmCampaign: utmCampaign || undefined
           };
         }).filter(lead => lead && lead.firstName && lead.lastName && lead.phone);
-        
+
         setLeads(parsedLeads);
-        toast.success(`Successfully parsed ${parsedLeads.length} leads from Excel`);
+        const withUtm = parsedLeads.filter((l) => l.utmCampaign).length;
+        toast.success(
+          `Parsed ${parsedLeads.length} leads` +
+            (utmCampaignIndex !== -1 ? ` · ${withUtm} with utm_campaign from file` : '')
+        );
       } catch (error) {
         console.error('Error parsing Excel file:', error);
         toast.error('Failed to parse Excel file');
@@ -345,7 +407,10 @@ const ExcelUploader = () => {
     for (let i = 0; i < leads.length; i++) {
       try {
         const lead = leads[i];
-        const result = await processLead(lead, { ...apiConfig, referral: buildReferral() });
+        const result = await processLead(lead, {
+          ...apiConfig,
+          referral: buildReferral(lead.utmCampaign)
+        });
         
         processedResults.push({
           lead,
@@ -467,59 +532,112 @@ const ExcelUploader = () => {
         </div>
 
         <div className="ap-grid ap-grid-3">
-          {REFERRAL_KEYS.filter((key) => !LOCKED_REFERRAL_KEYS.includes(key)).map((key) => (
-            <div className="ap-rel" key={key}>
-              <label className="ap-label">{key}</label>
-              <select
-                className="ap-select"
-                value={referralValues[key]}
-                onChange={(e) => handleReferralChange(key, e.target.value)}
+          {/* affiliate_id: editable, drives campaign_id */}
+          <div className="ap-rel">
+            <label className="ap-label">affiliate_id</label>
+            <select
+              className="ap-select"
+              value={referralValues.affiliate_id}
+              onChange={(e) => handleReferralChange('affiliate_id', e.target.value)}
+            >
+              {referralOptions.affiliate_id.map((option) => (
+                <option key={option} value={option}>
+                  {optionLabel('affiliate_id', option)}
+                </option>
+              ))}
+            </select>
+            <div className="ap-add-group">
+              <input
+                className="ap-input"
+                placeholder="Affiliate ID"
+                value={newOption.affiliate_id || ''}
+                onChange={(e) =>
+                  setNewOption((prev) => ({ ...prev, affiliate_id: e.target.value }))
+                }
+              />
+              <input
+                className="ap-input"
+                placeholder="Name"
+                value={newOptionLabel.affiliate_id || ''}
+                onChange={(e) =>
+                  setNewOptionLabel((prev) => ({ ...prev, affiliate_id: e.target.value }))
+                }
+              />
+              <input
+                className="ap-input"
+                placeholder="Campaign ID"
+                value={newOptionCampaign.affiliate_id || ''}
+                onChange={(e) =>
+                  setNewOptionCampaign((prev) => ({ ...prev, affiliate_id: e.target.value }))
+                }
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addReferralOption('affiliate_id');
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="ap-btn ap-btn-ghost ap-btn-sm"
+                onClick={() => addReferralOption('affiliate_id')}
               >
-                {referralOptions[key].map((option) => (
-                  <option key={option} value={option}>
-                    {optionLabel(key, option)}
-                  </option>
-                ))}
-              </select>
-              <div className="ap-add-group">
-                <input
-                  className="ap-input"
-                  placeholder="Value"
-                  value={newOption[key] || ''}
-                  onChange={(e) =>
-                    setNewOption((prev) => ({ ...prev, [key]: e.target.value }))
-                  }
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      addReferralOption(key);
-                    }
-                  }}
-                />
-                <input
-                  className="ap-input"
-                  placeholder="Name (optional)"
-                  value={newOptionLabel[key] || ''}
-                  onChange={(e) =>
-                    setNewOptionLabel((prev) => ({ ...prev, [key]: e.target.value }))
-                  }
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      addReferralOption(key);
-                    }
-                  }}
-                />
-                <button
-                  type="button"
-                  className="ap-btn ap-btn-ghost ap-btn-sm"
-                  onClick={() => addReferralOption(key)}
-                >
-                  <i className="bi bi-plus-lg"></i>
-                </button>
-              </div>
+                <i className="bi bi-plus-lg"></i>
+              </button>
             </div>
-          ))}
+          </div>
+
+          {/* campaign_id: derived from the selected affiliate (read-only) */}
+          <div className="ap-rel">
+            <label className="ap-label">campaign_id</label>
+            <input className="ap-input" value={referralValues.campaign_id || '—'} readOnly />
+            <i className="bi bi-link-45deg ap-field-lock"></i>
+            <p className="ap-hint" style={{ marginTop: 6 }}>
+              Auto-linked to affiliate
+            </p>
+          </div>
+
+          {/* utm_campaign: editable default; overridden per-lead by the Excel column */}
+          <div className="ap-rel">
+            <label className="ap-label">utm_campaign</label>
+            <select
+              className="ap-select"
+              value={referralValues.utm_campaign}
+              onChange={(e) => handleReferralChange('utm_campaign', e.target.value)}
+            >
+              {referralOptions.utm_campaign.map((option) => (
+                <option key={option} value={option}>
+                  {optionLabel('utm_campaign', option)}
+                </option>
+              ))}
+            </select>
+            <div className="ap-add-group">
+              <input
+                className="ap-input"
+                placeholder="Add utm_campaign"
+                value={newOption.utm_campaign || ''}
+                onChange={(e) =>
+                  setNewOption((prev) => ({ ...prev, utm_campaign: e.target.value }))
+                }
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addReferralOption('utm_campaign');
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="ap-btn ap-btn-ghost ap-btn-sm"
+                onClick={() => addReferralOption('utm_campaign')}
+              >
+                <i className="bi bi-plus-lg"></i>
+              </button>
+            </div>
+            <p className="ap-hint" style={{ marginTop: 6 }}>
+              Default if the Excel has no utm_campaign column
+            </p>
+          </div>
         </div>
 
         <p className="ap-hint">
@@ -529,13 +647,15 @@ const ExcelUploader = () => {
               <span className="ap-code">
                 {referralLabels.affiliate_id[referralValues.affiliate_id]}
               </span>
+              {' → campaign '}
+              <span className="ap-code">{referralValues.campaign_id || '—'}</span>
               <br />
             </>
           )}
           {referralValues.utm_campaign && (
             <>
-              Campaign:{' '}
-              <span className="ap-code">{optionLabel('utm_campaign', referralValues.utm_campaign)}</span>
+              utm_campaign (default):{' '}
+              <span className="ap-code">{referralValues.utm_campaign}</span>
               <br />
             </>
           )}
@@ -576,7 +696,9 @@ const ExcelUploader = () => {
         <p className="ap-hint">
           File must contain at least <span className="ap-code">First Name</span> and{' '}
           <span className="ap-code">Phone</span> columns. If only First Name is provided with
-          multiple words, the last word becomes the Last Name.
+          multiple words, the last word becomes the Last Name. Add an optional{' '}
+          <span className="ap-code">utm_campaign</span> column to set it per lead; blank rows fall
+          back to the default above.
         </p>
       </div>
 
@@ -604,6 +726,7 @@ const ExcelUploader = () => {
                   <th>Last Name</th>
                   <th>Phone</th>
                   <th>Email</th>
+                  <th>utm_campaign</th>
                 </tr>
               </thead>
               <tbody>
@@ -614,11 +737,12 @@ const ExcelUploader = () => {
                     <td>{lead.lastName}</td>
                     <td className="ap-mono">{lead.phone}</td>
                     <td className="ap-mono">{lead.email || '—'}</td>
+                    <td className="ap-mono">{lead.utmCampaign || referralValues.utm_campaign}</td>
                   </tr>
                 ))}
                 {leads.length > 5 && (
                   <tr>
-                    <td colSpan="5" style={{ textAlign: 'center', color: 'var(--ap-muted)' }}>
+                    <td colSpan="6" style={{ textAlign: 'center', color: 'var(--ap-muted)' }}>
                       …and {leads.length - 5} more leads
                     </td>
                   </tr>

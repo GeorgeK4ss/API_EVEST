@@ -4,10 +4,6 @@
       "40175",
       "40638"
     ],
-    "campaign_id": [
-      "136068",
-      "406381"
-    ],
     "utm_campaign": [
       "SnapAITrading"
     ]
@@ -17,7 +13,10 @@
       "40175": "BrokerBase",
       "40638": "Kacper Filip"
     },
-    "campaign_id": {},
     "utm_campaign": {}
+  },
+  "campaignByAffiliate": {
+    "40175": "136068",
+    "40638": "136568"
   }
 }

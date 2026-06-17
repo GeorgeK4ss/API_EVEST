@@ -10,7 +10,7 @@ const PORT = process.env.API_PORT || 4000;
 const DATA_FILE = path.join(__dirname, 'src', 'data', 'referralData.json');
 
 // Only these parameters are user-editable / persisted.
-const EDITABLE_KEYS = ['affiliate_id', 'campaign_id', 'utm_campaign'];
+const EDITABLE_KEYS = ['affiliate_id', 'utm_campaign'];
 
 app.use(cors());
 app.use(express.json());
@@ -20,6 +20,7 @@ const readData = () => {
   const data = JSON.parse(raw);
   data.options = data.options || {};
   data.labels = data.labels || {};
+  data.campaignByAffiliate = data.campaignByAffiliate || {};
   EDITABLE_KEYS.forEach((key) => {
     data.options[key] = data.options[key] || [];
     data.labels[key] = data.labels[key] || {};
@@ -40,9 +41,10 @@ app.get('/api/referral', (req, res) => {
   }
 });
 
-// Add a new option { key, value, label? } and persist it to the file.
+// Add a new option { key, value, label?, campaign? } and persist it.
+// For affiliate_id, `campaign` records its linked campaign_id.
 app.post('/api/referral', (req, res) => {
-  const { key, value, label } = req.body || {};
+  const { key, value, label, campaign } = req.body || {};
   if (!EDITABLE_KEYS.includes(key)) {
     return res.status(400).json({ error: `Key "${key}" is not editable` });
   }
@@ -59,6 +61,12 @@ app.post('/api/referral', (req, res) => {
     const cleanLabel = (label || '').toString().trim();
     if (cleanLabel) {
       data.labels[key][cleanValue] = cleanLabel;
+    }
+    if (key === 'affiliate_id') {
+      const cleanCampaign = (campaign || '').toString().trim();
+      if (cleanCampaign) {
+        data.campaignByAffiliate[cleanValue] = cleanCampaign;
+      }
     }
     writeData(data);
     res.json(data);
