@@ -252,9 +252,16 @@ const ExcelUploader = () => {
         const workbook = XLSX.read(data, { type: 'array' });
         const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
         const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
-        
-        // Find column indices
-        const headers = jsonData[0].map(header => header.toLowerCase());
+
+        if (!Array.isArray(jsonData) || jsonData.length === 0 || !Array.isArray(jsonData[0])) {
+          toast.error('The Excel file appears to be empty');
+          return;
+        }
+
+        // Find column indices (coerce headers to strings so numbers/blanks are safe)
+        const headers = jsonData[0].map(header =>
+          (header === null || header === undefined ? '' : String(header)).trim().toLowerCase()
+        );
         const firstNameIndex = headers.indexOf('first name');
         const lastNameIndex = headers.indexOf('last name');
         const phoneIndex = headers.indexOf('phone');
@@ -265,20 +272,20 @@ const ExcelUploader = () => {
           return;
         }
         
+        // Coerce any cell to a trimmed string (handles numbers, dates, blanks)
+        const cell = (value) =>
+          value === null || value === undefined ? '' : String(value).trim();
+
         // Parse data rows
         const parsedLeads = jsonData.slice(1).map(row => {
-          let firstName = row[firstNameIndex] || '';
-          let lastName = '';
-          
-          // Check if last name column exists
-          if (lastNameIndex !== -1) {
-            lastName = row[lastNameIndex] || '';
-          }
-          
+          if (!Array.isArray(row)) return null;
+          let firstName = cell(row[firstNameIndex]);
+          let lastName = lastNameIndex !== -1 ? cell(row[lastNameIndex]) : '';
+
           // If last name is empty, handle automation logic
           if (!lastName && firstName) {
-            const nameParts = firstName.trim().split(' ');
-            
+            const nameParts = firstName.split(' ').filter(Boolean);
+
             if (nameParts.length > 1) {
               // If more than one word, move last word to last name
               lastName = nameParts.pop();
@@ -288,14 +295,15 @@ const ExcelUploader = () => {
               lastName = firstName;
             }
           }
-          
+
+          const email = emailIndex !== -1 ? cell(row[emailIndex]) : '';
           return {
-            firstName: firstName,
-            lastName: lastName,
-            phone: row[phoneIndex] ? row[phoneIndex].toString() : '',
-            email: emailIndex !== -1 ? row[emailIndex] : undefined
+            firstName,
+            lastName,
+            phone: cell(row[phoneIndex]),
+            email: email || undefined
           };
-        }).filter(lead => lead.firstName && lead.lastName && lead.phone);
+        }).filter(lead => lead && lead.firstName && lead.lastName && lead.phone);
         
         setLeads(parsedLeads);
         toast.success(`Successfully parsed ${parsedLeads.length} leads from Excel`);
